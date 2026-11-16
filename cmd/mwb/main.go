@@ -269,7 +269,7 @@ func main() {
 			// Start bidirectional capture if enabled
 			var cap *capture.Capturer
 			if *bidirectional {
-				screen := capture.GetScreenSizeXrandr()
+				screen := capture.GetScreenSize()
 				slog.Info("screen detected", "width", screen.Width, "height", screen.Height)
 
 				cap = capture.New(conn, screen, *edgeSide)

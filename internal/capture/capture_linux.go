@@ -324,9 +324,18 @@ func (c *Capturer) Run() error {
 		return fmt.Errorf("find input devices: %w", err)
 	}
 	if c.pointer == nil {
-		c.pointer, err = newX11Pointer(getDisplay())
-		if err != nil {
-			return fmt.Errorf("connect to X11 for cursor position: %w", err)
+		if isHyprland() {
+			c.pointer, err = newHyprlandPointer()
+			if err != nil {
+				return fmt.Errorf("connect to Hyprland for cursor position: %w", err)
+			}
+			slog.Info("using Hyprland pointer positioner")
+		} else {
+			c.pointer, err = newX11Pointer(getDisplay())
+			if err != nil {
+				return fmt.Errorf("connect to X11 for cursor position: %w", err)
+			}
+			slog.Info("using X11 pointer positioner")
 		}
 	}
 	slog.Info("found input devices", "count", len(devices))

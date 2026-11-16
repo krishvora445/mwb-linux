@@ -127,6 +127,16 @@ func (m *Manager) setLocalFileClipboard(path string) error {
 	target := preferredFileClipboardTarget(os.Getenv("XDG_CURRENT_DESKTOP"))
 	payload := fileClipboardPayload(abs, target)
 
+	if isWaylandClipboard() {
+		ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "wl-copy", "-t", target)
+		cmd.Stdin = bytes.NewBufferString(payload)
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-t", target, "-i")

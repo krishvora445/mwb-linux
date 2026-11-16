@@ -26,6 +26,23 @@ const (
 // the text path: sending the filename as text instead of the file is the wrong
 // behaviour and is what happens without this.
 func (m *Manager) getLocalFileClipboard() []string {
+	if isWaylandClipboard() {
+		ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+		targets, err := exec.CommandContext(ctx, "wl-paste", "-l").Output()
+		cancel()
+		if err == nil {
+			target := clipboardFileTarget(string(targets))
+			if target != "" {
+				ctx2, cancel2 := context.WithTimeout(context.Background(), execTimeout)
+				out, err2 := exec.CommandContext(ctx2, "wl-paste", "-t", target).Output()
+				cancel2()
+				if err2 == nil {
+					return parseFileURIs(string(out))
+				}
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
 	defer cancel()
 	targetCmd := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-t", "TARGETS", "-o")

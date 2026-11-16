@@ -8,6 +8,18 @@ import (
 	"strings"
 )
 
+// GetScreenSize detects screen size via Hyprland IPC if running on Hyprland,
+// or via xrandr on X11/XWayland.
+func GetScreenSize() ScreenInfo {
+	if isHyprland() {
+		info, err := GetScreenSizeHyprland()
+		if err == nil && info.Width > 0 && info.Height > 0 {
+			return info
+		}
+	}
+	return GetScreenSizeXrandr()
+}
+
 // GetScreenSizeXrandr detects screen size via xrandr.
 func GetScreenSizeXrandr() ScreenInfo {
 	out, err := exec.Command("xrandr", "--current").Output()

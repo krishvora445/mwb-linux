@@ -483,6 +483,10 @@ func (m *Manager) handleRemoteData(data []byte, isImage bool) {
 	slog.Info("clipboard text received from remote", "len", len(plainText))
 }
 
+func isWaylandClipboard() bool {
+	return os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") != ""
+}
+
 // handleImageClipboard processes received image data and sets it to clipboard.
 func (m *Manager) handleImageClipboard(data []byte) {
 	slog.Info("processing image clipboard", "rawSize", len(data))
@@ -502,6 +506,36 @@ func (m *Manager) handleImageClipboard(data []byte) {
 			slog.Info("image data doesn't have known header, trying as raw DIB",
 				"first4", fmt.Sprintf("%02x %02x %02x %02x", data[0], data[1], data[2], data[3]))
 			mimeType = "image/bmp"
+		}
+	}
+
+	if isWaylandClipboard() {
+		ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+		cmd := exec.CommandContext(ctx, "wl-copy", "-t", mimeType)
+		cmd.Stdin = bytes.NewReader(imgData)
+		err := cmd.Run()
+		cancel()
+		if err == nil {
+			m.mu.Lock()
+			m.justSet = time.Now()
+			m.lastHash = fmt.Sprintf("img:%d", len(data))
+			m.mu.Unlock()
+			slog.Info("clipboard image received from remote (via wl-copy)", "size", len(data), "mime", mimeType)
+			return
+		}
+		// Fallback with image/png
+		ctx2, cancel2 := context.WithTimeout(context.Background(), execTimeout)
+		cmd2 := exec.CommandContext(ctx2, "wl-copy", "-t", "image/png")
+		cmd2.Stdin = bytes.NewReader(imgData)
+		err2 := cmd2.Run()
+		cancel2()
+		if err2 == nil {
+			m.mu.Lock()
+			m.justSet = time.Now()
+			m.lastHash = fmt.Sprintf("img:%d", len(data))
+			m.mu.Unlock()
+			slog.Info("clipboard image received from remote (via wl-copy image/png)", "size", len(data))
+			return
 		}
 	}
 
@@ -538,6 +572,16 @@ func (m *Manager) handleImageClipboard(data []byte) {
 // getLocalClipboard reads the current clipboard text.
 // Times out after execTimeout to prevent blocking the poll goroutine indefinitely.
 func (m *Manager) getLocalClipboard() string {
+	if isWaylandClipboard() {
+		ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+		cmd := exec.CommandContext(ctx, "wl-paste", "--no-newline")
+		out, err := cmd.Output()
+		cancel()
+		if err == nil {
+			return string(out)
+		}
+	}
+
 	for _, args := range [][]string{
 		{"xclip", "-selection", "clipboard", "-o"},
 		{"xsel", "--clipboard", "--output"},
@@ -557,6 +601,17 @@ func (m *Manager) getLocalClipboard() string {
 // setLocalClipboard sets the clipboard text.
 // Times out after execTimeout to prevent blocking on a hung xclip/xsel.
 func (m *Manager) setLocalClipboard(text string) {
+	if isWaylandClipboard() {
+		ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+		cmd := exec.CommandContext(ctx, "wl-copy")
+		cmd.Stdin = strings.NewReader(text)
+		err := cmd.Run()
+		cancel()
+		if err == nil {
+			return
+		}
+	}
+
 	for _, args := range [][]string{
 		{"xclip", "-selection", "clipboard"},
 		{"xsel", "--clipboard", "--input"},
@@ -571,11 +626,25 @@ func (m *Manager) setLocalClipboard(text string) {
 			return
 		}
 	}
-	slog.Error("set clipboard failed — both xclip and xsel failed")
+	slog.Error("set clipboard failed — wl-copy, xclip and xsel failed")
 }
 
 // getLocalImageClipboard checks if clipboard contains an image and returns it.
 func (m *Manager) getLocalImageClipboard() []byte {
+	if isWaylandClipboard() {
+		ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+		targets, err := exec.CommandContext(ctx, "wl-paste", "-l").Output()
+		cancel()
+		if err == nil && strings.Contains(string(targets), "image/png") {
+			ctx2, cancel2 := context.WithTimeout(context.Background(), execTimeout)
+			imgData, err2 := exec.CommandContext(ctx2, "wl-paste", "-t", "image/png").Output()
+			cancel2()
+			if err2 == nil && len(imgData) > 0 {
+				return imgData
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
 	cmd := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-t", "TARGETS", "-o")
 	cmd.Env = append(os.Environ(), "DISPLAY="+m.display)
